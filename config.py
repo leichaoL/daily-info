@@ -32,7 +32,8 @@ SYS_CONFIG = {
     "beginday": "",
     # 图文类型，非必填
     # 1为单图文，2为多图文，默认单图文
-    "msgtype": ""
+    "msgtype": "",
+    "notionsecret": ""
 }
 
 

@@ -6,6 +6,7 @@ import re
 import config
 import random
 from zhdate import ZhDate
+from notion_client import Client
 
 os.environ['TZ'] = 'Asia/Shanghai'
 corpid = config.get("corpid")
@@ -23,6 +24,7 @@ beginday = config.get("beginday").split("&&")
 beginname = config.get("beginname").split("&&")
 begin_day_list = list(filter(None, beginday))
 begin_name_list = list(filter(None, beginname))
+notion_secret = config.get("notionsecret")
 
 
 # 获取随机图片
@@ -98,23 +100,33 @@ def get_bing():
 
 
 # 获取和风天气数据
+# 直接搜索county，然后根据city确定是否为需要的地区
 
 
 def get_weather(city_name):
     try:
-        city_id = None
+        # city_id = None
+        # weather_list = []
+        # weather_info = None
+        # city = city_name.split("-")[0]
+        # county = city_name.split("-")[1]
+        # city_url = f"https://geoapi.qweather.com/v2/city/lookup?key={qweather}&location={city}"
+        # city_json = requests.get(city_url).json()
+        # city_code = city_json["code"]
+
+        county_id = None
         weather_list = []
         weather_info = None
         city = city_name.split("-")[0]
         county = city_name.split("-")[1]
-        city_url = f"https://geoapi.qweather.com/v2/city/lookup?key={qweather}&location={city}"
-        city_json = requests.get(city_url).json()
-        city_code = city_json["code"]
-        if city_code.__eq__("200"):
-            for city_data in city_json["location"]:
-                county_name = city_data["name"]
-                if county_name.__eq__(county):
-                    city_id = city_data["id"]
+        county_url = f"https://geoapi.qweather.com/v2/city/lookup?key={qweather}&location={city}"
+        county_json = requests.get(county_url).json()
+        county_code = county_json["code"]
+        if county_code.__eq__("200"):
+            for county_data in county_json["location"]:
+                admin2_name = county_data["adm2"]
+                if admin2_name.__eq__(city):
+                    city_id = county_data["id"]
         if city_id:
             weather_url = f"https://devapi.qweather.com/v7/weather/3d?key={qweather}&location={city_id}"
             weather_json = requests.get(weather_url).json()
@@ -253,7 +265,7 @@ def get_duration(begin_day, begin_name):
         duration_day = 0
         duration_tip = f"🌟 {begin_name}就是今天啦！"
     elif today > begin_date:
-        duration_day = int(str(today.__sub__(begin_date)).split(" ")[0])
+        duration_day = int(str(today.__sub__(begin_date)).split(" ")[0]) + 1
         duration_tip = f"🗓️ {begin_name}已经 {duration_day} 天"
     else:
         duration_day = int(str(begin_date.__sub__(today)).split(" ")[0])
@@ -339,6 +351,50 @@ def handle_extra(out_title, inner_title, content, pic, link):
         }
     else:
         return None
+filter = {"property": 'Date', 'date': {'equals': today_str}}
+results = notion.databases.query(databaseid, filter = filter, page_size = 1)
+results
+
+notion = Client(auth=notion_secret)
+def get_notion_id():
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    results = notion.search(query=today_str).get("results")
+    if len(results) > 0:
+        result = results[0]
+        page_id = result["id"]
+    return page_id
+
+def get_notion_status():
+    today_str = datetime.date.today().strftime("%Y/%m/%d")
+    pages = notion.search(query=today_str).get("results")
+    if len(pages) > 0:
+        page = pages[0]
+        page_status = page["properties"]["Published"]["checkbox"]
+    else:
+        page_status = "False"
+    return page_status
+
+def get_notion_text(page_id):
+    blocks = notion.blocks.children.list(block_id = page_id)["results"]
+    text = ""
+    for block in blocks:
+        type = block["type"]
+        if len(block[type]["rich_text"]) == 0:
+            text = text + "\n"
+        else:
+            text = text + "\n" + block[type]["rich_text"][0]["plain_text"]
+    return text
+
+def update():
+    old_status = get_notion_status()
+    while (datetime.now().hour >= 12) & (datetime.now().hour <= 18):
+        new_status = get_notion_status()
+        if (new_status != old_status) & (new_status == True):
+            old_status = new_status
+            sendMsg()
+        elif (new_status != old_status) & (new_status == False):
+            old_status = new_status
+        time.sleep(5)
 
 
 # 处理信息
@@ -452,6 +508,7 @@ def push(token, data):
 
 
 def main():
+    notion = Client(auth=notion_secret)
     if corpid and corpsecret and agentid:
         values = handle_message()
         token = get_token(corpid, corpsecret)
